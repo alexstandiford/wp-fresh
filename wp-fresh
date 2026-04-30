@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Spin up a fresh, throwaway WordPress install via @wordpress/env.
+#
+# Usage:
+#   wp-fresh [name]          Create and start a sandbox (auto-named if omitted)
+#   wp-fresh list            Show sandboxes under /tmp
+#   wp-fresh destroy <name>  Stop and delete a sandbox
+#   wp-fresh destroy --all   Destroy every wp-fresh sandbox
+
+WP_FRESH_HOME="${WP_FRESH_HOME:-$HOME/.local/share/wp-fresh}"
+WP_ENV_BIN="$WP_FRESH_HOME/node_modules/.bin/wp-env"
+SANDBOX_ROOT="/tmp"
+SANDBOX_PREFIX="wp-fresh-"
+
+ensure_wp_env() {
+	if [[ -x "$WP_ENV_BIN" ]]; then return; fi
+	echo "First-time setup: installing @wordpress/env into $WP_FRESH_HOME ..." >&2
+	mkdir -p "$WP_FRESH_HOME"
+	(cd "$WP_FRESH_HOME" && npm init -y >/dev/null && npm install --save-dev @wordpress/env >&2)
+}
+
+find_free_port() {
+	local port=$1
+	while ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${port}$"; do
+		port=$((port + 1))
+	done
+	echo "$port"
+}
+
+cmd_create() {
+	local name="${1:-$(date +%Y%m%d-%H%M%S)}"
+	local sandbox="$SANDBOX_ROOT/$SANDBOX_PREFIX$name"
+
+	if [[ -d "$sandbox" ]]; then
+		echo "Sandbox $sandbox already exists. Pick a different name or destroy it first." >&2
+		exit 1
+	fi
+
+	ensure_wp_env
+
+	local port tests_port
+	port=$(find_free_port 8900)
+	tests_port=$(find_free_port $((port + 100)))
+
+	mkdir -p "$sandbox"
+	cat > "$sandbox/.wp-env.json" <<EOF
+{
+	"core": null,
+	"phpVersion": "8.2",
+	"port": $port,
+	"testsPort": $tests_port,
+	"testsEnvironment": false
+}
+EOF
+
+	echo "Starting WordPress in $sandbox ..."
+	(cd "$sandbox" && "$WP_ENV_BIN" start)
+
+	cat <<EOF
+
+WordPress is ready.
+
+  URL:        http://localhost:$port
+  Admin:      http://localhost:$port/wp-admin   (admin / password)
+  Tests:      http://localhost:$tests_port
+  Sandbox:    $sandbox
+
+  wp-cli:     (cd $sandbox && $WP_ENV_BIN run cli wp <command>)
+  Stop:       (cd $sandbox && $WP_ENV_BIN stop)
+  Destroy:    wp-fresh destroy $name
+EOF
+}
+
+cmd_list() {
+	shopt -s nullglob
+	local found=0
+	for dir in "$SANDBOX_ROOT/$SANDBOX_PREFIX"*; do
+		[[ -d "$dir" ]] || continue
+		found=1
+		local name="${dir##*/$SANDBOX_PREFIX}"
+		local port="?"
+		if [[ -f "$dir/.wp-env.json" ]]; then
+			port=$(grep -oE '"port"[[:space:]]*:[[:space:]]*[0-9]+' "$dir/.wp-env.json" | grep -oE '[0-9]+' || echo "?")
+		fi
+		printf "  %-30s http://localhost:%s\n" "$name" "$port"
+	done
+	if [[ $found -eq 0 ]]; then
+		echo "No wp-fresh sandboxes."
+	fi
+}
+
+cmd_destroy_one() {
+	local name="$1"
+	local sandbox="$SANDBOX_ROOT/$SANDBOX_PREFIX$name"
+	if [[ ! -d "$sandbox" ]]; then
+		echo "No sandbox at $sandbox" >&2
+		return 1
+	fi
+	echo "Destroying $sandbox ..."
+	(cd "$sandbox" && "$WP_ENV_BIN" destroy --scripts=false <<<"y" >/dev/null 2>&1) || true
+	rm -rf "$sandbox"
+	echo "Removed $name"
+}
+
+cmd_destroy() {
+	if [[ $# -eq 0 ]]; then
+		echo "Usage: wp-fresh destroy <name> | --all" >&2
+		exit 1
+	fi
+	if [[ "$1" == "--all" ]]; then
+		shopt -s nullglob
+		for dir in "$SANDBOX_ROOT/$SANDBOX_PREFIX"*; do
+			[[ -d "$dir" ]] || continue
+			cmd_destroy_one "${dir##*/$SANDBOX_PREFIX}" || true
+		done
+		return
+	fi
+	cmd_destroy_one "$1"
+}
+
+case "${1:-}" in
+	""|create) shift || true; cmd_create "${1:-}" ;;
+	list|ls)   cmd_list ;;
+	destroy|rm) shift; cmd_destroy "$@" ;;
+	-h|--help|help)
+		sed -n '4,10p' "$0" | sed 's/^# \{0,1\}//'
+		;;
+	*)
+		# Treat unknown first arg as sandbox name for `wp-fresh foo`
+		cmd_create "$1"
+		;;
+esac
