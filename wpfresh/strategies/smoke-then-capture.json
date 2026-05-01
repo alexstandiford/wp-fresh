@@ -1,0 +1,28 @@
+{
+  "id": "smoke-then-capture",
+  "kind": "composite",
+  "description": "Run smoke check; if it passes, capture screenshots. Use for the fast PR-check loop where screenshots are wasted if the build is already broken.",
+  "strategies": [
+    {
+      "ref": "smoke",
+      "config": {
+        "urls": [
+          { "path": "/", "name": "frontend-home", "expect_status": 200 },
+          { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true, "expect_status": 200 }
+        ],
+        "fail_on": ["php_fatal", "5xx", "white_screen"]
+      }
+    },
+    {
+      "ref": "capture",
+      "runIf": "previous-passed",
+      "config": {
+        "resolution": "1280x800",
+        "urls": [
+          { "path": "/", "name": "frontend-home" },
+          { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true }
+        ]
+      }
+    }
+  ]
+}

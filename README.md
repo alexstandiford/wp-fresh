@@ -1,100 +1,237 @@
 # wp-fresh
 
-Spin up a fresh, throwaway WordPress install with one command.
+A fleet manager for ephemeral WordPress test environments built on
+[WordPress Playground](https://wordpress.github.io/wordpress-playground/).
+Declare environments and runnable strategies as JSON, execute them locally
+or via an MCP server. Designed primarily for AI agents that need to spin up
+configured WordPress installs, smoke-test plugin builds, and capture
+screenshots without the overhead of Docker.
 
-```bash
-$ wp-fresh
-WordPress is ready.
+> **Status:** alpha. APIs and on-disk formats may change.
 
-  URL:        http://localhost:8900
-  Admin:      http://localhost:8900/wp-admin   (admin / password)
-  Sandbox:    /tmp/wp-fresh-20260430-133800
-```
+## Concepts
 
-## Why
+- **Environment** — a declarative WordPress install (Blueprint + WP/PHP
+  versions + tags). File-backed, reusable across runs.
+- **Strategy** — a pluggable operation that runs against a provisioned
+  instance. Built-ins: `smoke`, `capture`, `composite`.
+- **Run** — selects environments (by id or tag set) and a sequence of
+  strategy invocations. Emits a manifest.
 
-If you work on WordPress plugins or themes, you often need a clean install just
-to check one thing: does this hook fire on a fresh site, does this migration
-work, does this plugin conflict with that one. The official tooling
-(`@wordpress/env`) handles the heavy lifting, but in practice you hit some
-papercuts:
-
-- `npx @wordpress/env start` hard-codes ports `8888`/`8889`, so the second
-  sandbox you try to run collides with the first.
-- `npx --yes @wordpress/env` sometimes fails on npm dep resolution depending on
-  your Node version.
-- Every throwaway directory you create reinstalls the same ~400 packages.
-- Cleaning up afterwards means remembering which `/tmp` dir held what.
-
-`wp-fresh` is a small bash wrapper that smooths over all of that. Run one
-command, get a fresh WordPress site on a free port, and tear it down by name
-when you're done.
+Strategies don't share state within a run; sequencing via `runIf` is the
+only coordination. Composites bundle other strategies into a reusable unit.
 
 ## Install
 
-Requires `bash`, `node`/`npm`, and `docker`.
+Requires Node.js >= 20.18.
 
 ```bash
-curl -o ~/.local/bin/wp-fresh https://raw.githubusercontent.com/alexstandiford/wp-fresh/main/wp-fresh
-chmod +x ~/.local/bin/wp-fresh
+git clone https://github.com/alexstandiford/wp-fresh
+cd wp-fresh
+npm install
+npm run build
+npm link
 ```
 
-Make sure `~/.local/bin` is on your `PATH`.
-
-## Usage
+`playwright` is a peer dependency required by the `capture` strategy:
 
 ```bash
-wp-fresh                    # Create and start an auto-named sandbox
-wp-fresh my-test            # Create and start a sandbox named "my-test"
-wp-fresh list               # Show all wp-fresh sandboxes
-wp-fresh destroy my-test    # Stop and delete a sandbox
-wp-fresh destroy --all      # Destroy every wp-fresh sandbox
+npm install -g playwright
+npx playwright install chromium
 ```
 
-Each sandbox lives at `/tmp/wp-fresh-<name>/` and contains a single
-`.wp-env.json` file. The default admin login is `admin` / `password` —
-`@wordpress/env` defaults, not anything `wp-fresh` overrides.
+## CLI usage
 
-To run `wp-cli` against a sandbox, the create command prints the exact
-invocation. It looks like:
+### `wpfresh run` — execute a run, capture a manifest
 
 ```bash
-(cd /tmp/wp-fresh-my-test && \
-  ~/.local/share/wp-fresh/node_modules/.bin/wp-env run cli wp plugin list)
+# Run the bundled wp-bare smoke check
+wpfresh run --run wpfresh/runs/wp-smoke.json
+
+# Disable snapshot caching (always run blueprint cold)
+wpfresh run --run wpfresh/runs/wp-smoke.json --no-snapshot
+
+# Use a custom environment directory
+wpfresh run --env-dir ./my-envs --run ./my-runs/smoke.json
+
+# Single-environment mode
+wpfresh run --env ./envs/siren-woo.json --run ./runs/quick.json
 ```
 
-## How it works
+Manifests land in `wpfresh-runs/<run_id>.json`. Capture artifacts land in
+`wpfresh-screenshots/<run_id>/<env_id>/<strategy_id>/`.
 
-`wp-fresh` is ~120 lines of bash. The interesting bits:
+### `wpfresh up` — spin up a live instance you can poke at
 
-- **Shared installer.** On first run, it does one `npm install @wordpress/env`
-  into `~/.local/share/wp-fresh/`. Every sandbox after that reuses the same
-  node_modules, so a new install takes seconds instead of a minute.
-- **Free ports.** Before starting, it scans `ss -tlnH` for occupied ports and
-  picks the first free port at or above `8900` for the dev site, plus one
-  ~100 above that for the tests site. No more port collisions when you have
-  five sandboxes running.
-- **Sandboxes are just directories.** Each sandbox is a plain directory in
-  `/tmp` with a generated `.wp-env.json`. `@wordpress/env` keys its container
-  state off the directory hash, so independent sandboxes don't step on each
-  other.
-- **Cleanup is honest.** `wp-fresh destroy` runs `wp-env destroy` to remove
-  containers and volumes, then removes the directory. `--all` does the same
-  for every sandbox under the `wp-fresh-` prefix.
+Holds an instance open in the foreground. Prints URL + admin credentials,
+tears down on Ctrl+C (or after `--ttl <seconds>` elapses).
 
-That's the whole story. Read [`wp-fresh`](./wp-fresh) — it's short.
+```bash
+# Vanilla WP, latest/8.3, no plugin — quick scratch instance
+wpfresh up
 
-## Configuration
+# Vanilla WP + an ad-hoc blueprint (file or bundle directory)
+wpfresh up --blueprint /path/to/blueprint.json
+wpfresh up --blueprint /path/to/blueprint-bundle/
 
-One environment variable:
+# Pin versions (works with or without --blueprint)
+wpfresh up --wp 6.7 --php 8.2
 
-- `WP_FRESH_HOME` — where to install the shared `@wordpress/env`. Defaults to
-  `~/.local/share/wp-fresh`.
+# Use a configured environment from <project_dir>/wpfresh/environments/
+wpfresh up siren-essentials-woo
 
-If you want PHP versions other than 8.2, edit the generated `.wp-env.json`
-inside the sandbox and run `wp-env start` again. `wp-fresh` doesn't try to
-expose every `@wordpress/env` knob — it's a fast path for the common case.
+# Auto-destroy after 10 minutes
+wpfresh up siren-essentials-woo --ttl 600
+```
+
+Snapshot cache is shared across modes: an ad-hoc `--blueprint` invocation
+that resolves to the same blueprint contents + WP/PHP versions as a
+configured environment will hit the same on-disk snapshot.
+
+## MCP usage (Claude Code)
+
+Add wp-fresh as a stdio MCP server. In `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "wpfresh": {
+      "command": "wpfresh",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Code. The agent now has eight tools:
+
+**Run-style (one-shot, returns a manifest):**
+
+- `list_environments(project_dir, tags?)` — list environments in a project.
+- `list_strategies()` — list built-in strategies with their config schemas.
+- `run(project_dir, run, use_snapshots?)` — execute a run, return the manifest.
+- `inspect_manifest(project_dir, run_id)` — read a previously-written manifest.
+- `clear_snapshot(project_dir, env_id)` — delete a cached snapshot.
+
+**Persistent instances (for live troubleshooting):**
+
+- `provision_persistent(project_dir, env_id, ttl_seconds?)` — provision an
+  instance and keep it running. Returns URL + admin credentials. Default TTL
+  is 30 min; pass `0` for no TTL.
+- `list_instances()` — enumerate live instances tracked by this server.
+- `destroy(instance_id)` — dispose an instance and release its snapshot lock.
+
+The persistent-instance tools are the agent's recovery loop: when a smoke
+fails, the agent can `provision_persistent` against the failing env, fetch
+or browse the live admin to investigate, then `destroy`.
+
+Tool descriptions tell the agent when to reach for which tool. Configs are
+typed by JSON Schema returned from `list_strategies`.
+
+The MCP server tracks persistent instances in-process: when the server
+exits (SIGINT/SIGTERM), all tracked instances are torn down and their
+snapshot locks released.
+
+## Project layout
+
+```
+your-project/
+├── wpfresh/
+│   ├── environments/
+│   │   ├── siren-bare.json
+│   │   └── siren-woo.json
+│   ├── blueprints/
+│   │   ├── siren-bare.blueprint.json
+│   │   └── siren-woo.blueprint.json
+│   └── runs/
+│       └── pr-smoke.json
+├── wpfresh-runs/                  # manifests (gitignored)
+└── wpfresh-screenshots/           # capture artifacts (gitignored)
+```
+
+Snapshots are cached at `~/.wpfresh/snapshots/<key>/` keyed off
+`sha256(blueprint + wp_version + php_version + playground_cli_major)`. The
+first run for a key populates the directory; subsequent runs restore from it
+in seconds via Playground's `mount-before-install` mechanism.
+
+## Schema reference
+
+JSON Schemas (Draft 2020-12) are emitted to `dist/schemas/generated/` after
+`npm run build`:
+
+- `environment.schema.json`
+- `run.schema.json`
+- `tag-selector.schema.json`
+- `strategy-invocation.schema.json`
+- `composite-strategy.schema.json`
+- `manifest.schema.json`
+
+Reference them via `$schema` in your env/run files for IDE autocomplete.
+
+## Built-in strategies
+
+### `smoke`
+
+Probe URLs and check status + body for PHP errors. Default failure
+conditions: PHP fatal in body, 5xx status, white screen on a 200.
+
+```json
+{
+  "ref": "smoke",
+  "config": {
+    "urls": [
+      { "path": "/", "expect_status": 200 },
+      { "path": "/wp-admin/", "auth": true, "expect_status": 200 }
+    ],
+    "fail_on": ["php_fatal", "5xx", "white_screen"]
+  }
+}
+```
+
+### `capture`
+
+Take screenshots via Playwright. Per-URL viewport, optional auth, optional
+selector wait. Smoke-resolution defaults are tuned for cheap AI consumption
+(~1500 tokens per screenshot).
+
+```json
+{
+  "ref": "capture",
+  "config": {
+    "resolution": "1280x800",
+    "urls": [
+      { "path": "/wp-admin/admin.php?page=siren", "name": "siren-overview", "auth": true }
+    ]
+  }
+}
+```
+
+### `composite`
+
+Run a sequence of inner strategies, each with its own `runIf`.
+
+```json
+{
+  "ref": "composite",
+  "config": {
+    "strategies": [
+      { "ref": "smoke", "config": { ... } },
+      { "ref": "capture", "runIf": "previous-passed", "config": { ... } }
+    ]
+  }
+}
+```
+
+## Development
+
+```bash
+npm test              # unit tests (vitest)
+npm run test:slow     # integration tests against a real Playground
+npm run test:all      # both
+npm run typecheck     # tsc against src/test/scripts
+npm run build         # compile + emit JSON Schema files
+```
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+GPL-2.0-or-later. See [LICENSE](./LICENSE).

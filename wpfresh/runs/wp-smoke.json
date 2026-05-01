@@ -1,0 +1,17 @@
+{
+  "id": "wp-smoke",
+  "description": "Quick smoke test against the wp-bare environment to verify the install boots cleanly.",
+  "environments": { "ids": ["wp-bare"] },
+  "strategies": [
+    {
+      "ref": "smoke",
+      "config": {
+        "urls": [
+          { "path": "/", "name": "frontend-home", "expect_status": 200 },
+          { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true, "expect_status": 200 }
+        ],
+        "fail_on": ["php_fatal", "5xx", "white_screen"]
+      }
+    }
+  ]
+}

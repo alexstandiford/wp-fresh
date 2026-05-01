@@ -1,0 +1,58 @@
+{
+  "name": "wp-fresh",
+  "version": "0.1.0-alpha.0",
+  "description": "Fleet manager for ephemeral WordPress test environments with pluggable strategies, exposed via MCP.",
+  "license": "GPL-2.0-or-later",
+  "author": "Alex Standiford",
+  "type": "module",
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "bin": {
+    "wpfresh": "./bin/wpfresh.js"
+  },
+  "main": "./dist/cli/index.js",
+  "exports": {
+    ".": "./dist/cli/index.js",
+    "./mcp": "./dist/mcp/index.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "wpfresh"
+  ],
+  "scripts": {
+    "build": "tsc && npm run build:schemas",
+    "build:schemas": "tsx scripts/build-schemas.ts",
+    "dev": "tsx watch src/cli/index.ts",
+    "test": "vitest run",
+    "test:slow": "vitest run --config vitest.slow.config.ts",
+    "test:all": "npm test && npm run test:slow",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@sinclair/typebox": "^0.34.0",
+    "@wp-playground/cli": "^3.0.0",
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.0",
+    "commander": "^12.0.0",
+    "proper-lockfile": "^4.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "playwright": "^1.59.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "peerDependencies": {
+    "playwright": "^1.50.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
+  }
+}

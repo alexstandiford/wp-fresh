@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# wpfresh runtime artifacts
+wpfresh-screenshots/
+wpfresh-runs/
+
+# local-only environments (not the public siren-bare sample)
+wpfresh/environments/*-local.json

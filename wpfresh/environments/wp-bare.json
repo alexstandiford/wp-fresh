@@ -1,0 +1,8 @@
+{
+  "id": "wp-bare",
+  "description": "Vanilla WordPress install with no plugins. Reference scenario for smoke-testing wpfresh itself.",
+  "tags": ["wp", "bare", "reference"],
+  "blueprint": "../blueprints/wp-bare.blueprint.json",
+  "wp_version": "latest",
+  "php_version": "8.3"
+}

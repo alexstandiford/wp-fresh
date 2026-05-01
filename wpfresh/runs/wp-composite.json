@@ -1,0 +1,35 @@
+{
+  "id": "wp-composite",
+  "description": "Demonstrate composite strategy: smoke + capture bundled as one entry in the manifest.",
+  "environments": { "ids": ["wp-bare"] },
+  "strategies": [
+    {
+      "ref": "composite",
+      "config": {
+        "strategies": [
+          {
+            "ref": "smoke",
+            "config": {
+              "urls": [
+                { "path": "/", "name": "frontend-home", "expect_status": 200 },
+                { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true, "expect_status": 200 }
+              ],
+              "fail_on": ["php_fatal", "5xx", "white_screen"]
+            }
+          },
+          {
+            "ref": "capture",
+            "runIf": "previous-passed",
+            "config": {
+              "resolution": "1280x800",
+              "urls": [
+                { "path": "/", "name": "frontend-home" },
+                { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

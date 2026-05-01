@@ -1,0 +1,28 @@
+{
+  "id": "wp-capture",
+  "description": "Smoke + screenshot capture for the wp-bare environment. Capture runs only if smoke passes.",
+  "environments": { "ids": ["wp-bare"] },
+  "strategies": [
+    {
+      "ref": "smoke",
+      "config": {
+        "urls": [
+          { "path": "/", "name": "frontend-home", "expect_status": 200 },
+          { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true, "expect_status": 200 }
+        ],
+        "fail_on": ["php_fatal", "5xx", "white_screen"]
+      }
+    },
+    {
+      "ref": "capture",
+      "runIf": "previous-passed",
+      "config": {
+        "resolution": "1280x800",
+        "urls": [
+          { "path": "/", "name": "frontend-home" },
+          { "path": "/wp-admin/", "name": "admin-dashboard", "auth": true }
+        ]
+      }
+    }
+  ]
+}

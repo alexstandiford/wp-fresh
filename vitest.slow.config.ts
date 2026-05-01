@@ -1,0 +1,14 @@
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    include: ["test/**/*.slow.test.ts"],
+    testTimeout: 120_000,
+    pool: "forks",
+    poolOptions: {
+      forks: { singleFork: false },
+    },
+    fileParallelism: false,
+    isolate: true,
+  },
+});
